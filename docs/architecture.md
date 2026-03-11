@@ -1,4 +1,22 @@
-# Architecture
+# System Architecture
+```mermaid
+flowchart TD
+
+A[Platform Backends<br>Taobao / Pinduoduo / Douyin] 
+--> B[Raw Reports<br>Excel / CSV]
+
+B --> C[ETL Pipeline<br>Python Scripts]
+
+C --> D[PostgreSQL Database]
+
+D --> E[Business Dashboards]
+
+D --> F[Management Reporting]
+
+D --> G[Future AI Analysis]
+
+H[OpenClaw Automation<br>Future] --> B
+```
 
 ## Project Overview
 
