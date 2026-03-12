@@ -8,8 +8,13 @@ The company sells cosmetic and nail products through multiple ecommerce platform
 
 - Pinduoduo
 - Douyin
+- Tianmao
 - Taobao
+- Weipinhui
 - Xiaohongshu
+- Wechat
+- Tiktok
+- jingdong
 
 Currently, employees manually download reports from each platform and upload them to shared spreadsheets (WPS). Management views daily performance reports through Feishu.
 
@@ -29,21 +34,23 @@ This project is being developed on a Mac mini environment.
 
 ## 2. Current Development Stage
 
-Current stage: Data Infrastructure Setup
+Current stage: First vertical slice implemented
 
 Completed:
 
 - Git repository created
 - Basic project structure initialized
 - Local development environment configured
-- Planning database schema
-- Planning ETL pipeline
+- PostgreSQL database `edp` created
+- v1 schema implemented for the first PDD shop-daily slice
+- First ETL script implemented for a real PDD Excel workbook
+- First sample shop-daily workbook loaded into PostgreSQL
 
 Not yet implemented:
 
-- Automated data ingestion
-- Database schema implementation
-- Reporting pipeline
+- generalized multi-platform ingestion
+- formalized import contracts for multiple report types
+- reporting pipeline
 - AI agent integration
 
 ---
@@ -145,52 +152,53 @@ Feishu Dashboard
 
 ---
 
-## 6. Planned Database Tables
+## 6. Current Database Tables
 
-Initial core tables may include:
+Current implemented core tables:
 
-orders  
-Stores order-level data from ecommerce platforms.
+platforms  
+Platform dimension table. Currently seeded with `pdd`.
 
-products  
-Stores product catalog and SKU information.
+shops  
+Shop dimension table for platform-owned stores.
 
-ads  
-Stores advertising performance metrics.
+import_files  
+Import lineage table for source workbook loads.
 
-inventory  
-Stores stock levels.
+fact_shop_day_sales  
+Canonical daily fact table at grain: `shop + date`.
 
-daily_metrics  
-Aggregated daily performance metrics.
-
-Note: table schemas are still under design.
+Note: the first implementation is intentionally narrow and centered on PDD shop-daily sales.
 
 ---
 
 ## 7. Directory Structure
 
-Example project structure:
+Implementation repo:
 
 project-root/
 
-data_raw/  
-Raw downloaded files
-
-scripts/  
+etl/  
 Python ETL scripts
 
 sql/  
 SQL schema and queries
 
-reports/  
-Generated reports
-
 docs/  
-Documentation
+Documentation and journal notes
 
-config/  
-Configuration files
+dashboard/  
+Reporting assets (later)
+
+data/  
+Local development data if needed
+
+Physical source-data storage lives outside the repo on DataHub:
+- `/Volumes/DataHub/ecommerce/raw`
+- `/Volumes/DataHub/ecommerce/processed`
+- `/Volumes/DataHub/ecommerce/warehouse`
+- `/Volumes/DataHub/ecommerce/contracts`
+- `/Volumes/DataHub/ecommerce/docs`
 
 ---
 
@@ -248,10 +256,10 @@ Security considerations:
 This system is designed to evolve gradually.
 
 Phase 1  
-Manual data ingestion + structured database
+Manual Excel/CSV ingestion + structured PostgreSQL warehouse
 
 Phase 2  
-Automated ETL
+Repeatable import contracts and normalized ETL across more shops / report types
 
 Phase 3  
 Automated reporting
