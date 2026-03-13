@@ -20,47 +20,39 @@ PLATFORM_NAME = "Pinduoduo"
 SHOP_CODE = "pdd_5"
 SHOP_NAME = "pdd_5"
 
-FILE_TYPE_CODE = "pdd_shop_daily"
-FILE_TYPE_NAME = "PDD Shop Daily Sales"
-GRAIN_CODE = "shop_day"
+FILE_TYPE_CODE = "pdd_sku_daily"
+FILE_TYPE_NAME = "PDD SKU Daily Sales"
+GRAIN_CODE = "sku_day"
 FILE_TYPE_VERSION = 1
 FILE_TYPE_DESCRIPTION = (
-    "Pinduoduo workbook import with shop-daily data sourced from the 日报数据源 "
-    "sheet into raw rows, PDD staging, and canonical shop-day facts."
+    "Pinduoduo workbook import with SKU-daily data sourced from the SKU源数据 "
+    "sheet into raw rows, PDD SKU staging, and canonical SKU-day facts."
 )
-TARGET_SHEET_TOKEN = "日报数据源"
-TARGET_SHEET_ROLE = "shop_daily_source"
+TARGET_SHEET_TOKEN = "SKU源数据"
+TARGET_SHEET_ROLE = "sku_daily_source"
 
 SOURCE_COLUMN_VARIANTS = {
     "sales_date": ["日期"],
-    "shop_visitor_count": ["店铺访客数"],
-    "shop_pageview_count": ["店铺浏览量"],
-    "product_visitor_count": ["商品访客数"],
-    "product_pageview_count": ["商品浏览数"],
-    "buyer_count": ["成交买家数", "支付买家数"],
-    "order_count": ["成交订单数", "支付订单数"],
-    "gross_sales_amount": ["成交金额", "支付金额"],
-    "conversion_rate": ["成交转化率", "支付转化率"],
-    "avg_order_value": ["客单价"],
-    "uv_value": ["UV价值"],
-    "product_favorite_user_count": ["商品收藏用户数"],
-    "refund_amount": ["退款金额"],
+    "product_name": ["商品"],
+    "product_id": ["商品id"],
+    "merchant_sku_code": ["商家编码-SKU维度"],
+    "product_specification": ["商品规格"],
+    "gross_quantity": ["商品数量(件)"],
+    "gross_product_amount": ["商品总价(元)"],
+    "merchant_net_amount": ["商家实收金额（元）", "商家实收金额(元)"],
+    "sku_id": ["SKU-ID"],
 }
 
 PREVIEW_MAPPING = {
     "sales_date": "sales_date",
-    "shop_visitor_count": "shop_visitor_count",
-    "shop_pageview_count": "shop_pageview_count",
-    "product_visitor_count": "product_visitor_count",
-    "product_pageview_count": "product_pageview_count",
-    "buyer_count": "buyer_count",
-    "order_count": "order_count",
-    "gross_sales_amount": "gross_sales_amount",
-    "conversion_rate": "conversion_rate",
-    "avg_order_value": "avg_order_value",
-    "uv_value": "uv_value",
-    "product_favorite_user_count": "product_favorite_user_count",
-    "refund_amount": "refund_amount",
+    "product_name": "product_name",
+    "product_id": "product_id",
+    "merchant_sku_code": "merchant_sku_code",
+    "product_specification": "product_specification",
+    "gross_quantity": "gross_quantity",
+    "gross_product_amount": "gross_product_amount",
+    "merchant_net_amount": "merchant_net_amount",
+    "sku_id": "sku_id",
 }
 
 RAW_ROW_COLUMNS = ["row_number", "sheet_name", "raw_payload"]
@@ -81,7 +73,7 @@ NS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Load PDD shop-daily data from a multi-sheet workbook into PostgreSQL."
+        description="Load PDD SKU-daily data from a multi-sheet workbook into PostgreSQL."
     )
     parser.add_argument("--workbook", default=WORKBOOK_PATH)
     parser.add_argument("--shop-code", default=SHOP_CODE)
@@ -89,7 +81,7 @@ def parse_args():
     parser.add_argument("--db-url", default=os.environ.get("DATABASE_URL"))
     parser.add_argument(
         "--sheet",
-        help="Override the auto-detected source sheet name. Defaults to the sheet containing 日报数据源.",
+        help="Override the auto-detected source sheet name. Defaults to the sheet containing SKU源数据.",
     )
     parser.add_argument(
         "--list-sheets",
@@ -491,7 +483,7 @@ SELECT
     '{escaped_target_sheet_name}',
     '{escaped_file_hash}',
     {raw_row_count},
-    'PDD workbook-level shop daily load from 日报数据源'
+    'PDD workbook-level SKU daily load from SKU源数据'
 FROM platforms p
 JOIN shops s ON s.platform_id = p.platform_id
 WHERE p.platform_code = '{PLATFORM_CODE}'
@@ -547,26 +539,22 @@ SELECT
     raw_payload
 FROM temp_raw_import_rows;
 
-INSERT INTO stg_pdd_shop_day_sales (
+INSERT INTO stg_pdd_sku_day_sales (
     import_file_id,
     raw_import_row_id,
     shop_id,
     source_row_number,
     sales_date,
-    shop_visitor_count,
-    shop_pageview_count,
-    product_visitor_count,
-    product_pageview_count,
-    buyer_count,
-    order_count,
-    gross_sales_amount,
-    conversion_rate,
-    avg_order_value,
-    uv_value,
-    product_favorite_user_count,
-    refund_amount
+    product_name,
+    product_id,
+    merchant_sku_code,
+    product_specification,
+    gross_quantity,
+    gross_product_amount,
+    merchant_net_amount,
+    sku_id
 )
-    SELECT
+SELECT
     r.import_file_id,
     r.raw_import_row_id,
     :shop_id,
@@ -576,50 +564,58 @@ INSERT INTO stg_pdd_shop_day_sales (
             THEN DATE '1899-12-30' + FLOOR(({payload_text('日期')})::NUMERIC)::INT
         ELSE ({payload_text('日期')})::DATE
     END AS sales_date,
-    FLOOR(({payload_numeric_text('店铺访客数')})::NUMERIC)::INT,
-    FLOOR(({payload_numeric_text('店铺浏览量')})::NUMERIC)::INT,
-    FLOOR(({payload_numeric_text('商品访客数')})::NUMERIC)::INT,
-    FLOOR(({payload_numeric_text('商品浏览数')})::NUMERIC)::INT,
-    FLOOR(({payload_numeric_text('成交买家数', '支付买家数')})::NUMERIC)::INT,
-    FLOOR(({payload_numeric_text('成交订单数', '支付订单数')})::NUMERIC)::INT,
-    ({payload_numeric_text('成交金额', '支付金额')})::NUMERIC(14,2),
-    ({payload_numeric_text('成交转化率', '支付转化率')})::NUMERIC(12,6),
-    ({payload_numeric_text('客单价')})::NUMERIC(14,2),
-    ({payload_numeric_text('UV价值')})::NUMERIC(14,2),
-    FLOOR(({payload_numeric_text('商品收藏用户数')})::NUMERIC)::INT,
-    ({payload_numeric_text('退款金额')})::NUMERIC(14,2)
+    {payload_text('商品')},
+    {payload_text('商品id')},
+    {payload_text('商家编码-SKU维度')},
+    {payload_text('商品规格')},
+    ({payload_numeric_text('商品数量(件)')})::NUMERIC(14,2),
+    ({payload_numeric_text('商品总价(元)')})::NUMERIC(14,2),
+    ({payload_numeric_text('商家实收金额（元）', '商家实收金额(元)')})::NUMERIC(14,2),
+    {payload_text('SKU-ID')}
 FROM raw_import_rows r
 WHERE r.import_file_id = :import_file_id
   AND r.sheet_name = '{escaped_target_sheet_name}';
 
-INSERT INTO fact_shop_day_sales (
+INSERT INTO fact_sku_day_sales (
     shop_id,
     sales_date,
-    buyer_count,
-    order_count,
-    gross_sales_amount,
-    refund_amount,
+    product_id,
+    sku_id,
+    merchant_sku_code,
+    product_specification,
+    gross_quantity,
+    gross_product_amount,
+    merchant_net_amount,
     import_file_id,
-    source_row_number
+    source_row_count
 )
 SELECT
     shop_id,
     sales_date,
-    buyer_count,
-    order_count,
-    gross_sales_amount,
-    refund_amount,
-    import_file_id,
-    source_row_number
-FROM stg_pdd_shop_day_sales
+    COALESCE(product_id, ''),
+    COALESCE(sku_id, ''),
+    COALESCE(merchant_sku_code, ''),
+    COALESCE(product_specification, ''),
+    SUM(gross_quantity),
+    SUM(gross_product_amount),
+    SUM(merchant_net_amount),
+    :import_file_id,
+    COUNT(*)
+FROM stg_pdd_sku_day_sales
 WHERE import_file_id = :import_file_id
-ON CONFLICT (shop_id, sales_date) DO UPDATE
-SET buyer_count = EXCLUDED.buyer_count,
-    order_count = EXCLUDED.order_count,
-    gross_sales_amount = EXCLUDED.gross_sales_amount,
-    refund_amount = EXCLUDED.refund_amount,
+GROUP BY
+    shop_id,
+    sales_date,
+    COALESCE(product_id, ''),
+    COALESCE(sku_id, ''),
+    COALESCE(merchant_sku_code, ''),
+    COALESCE(product_specification, '')
+ON CONFLICT (shop_id, sales_date, product_id, sku_id, merchant_sku_code, product_specification) DO UPDATE
+SET gross_quantity = EXCLUDED.gross_quantity,
+    gross_product_amount = EXCLUDED.gross_product_amount,
+    merchant_net_amount = EXCLUDED.merchant_net_amount,
     import_file_id = EXCLUDED.import_file_id,
-    source_row_number = EXCLUDED.source_row_number;
+    source_row_count = EXCLUDED.source_row_count;
 
 COMMIT;
 """
@@ -681,7 +677,7 @@ def main():
         temp_dir_path = Path(temp_dir)
         raw_csv_path = temp_dir_path / "raw_import_rows.csv"
         sheet_inventory_csv_path = temp_dir_path / "import_file_sheets.csv"
-        sql_path = temp_dir_path / "load_pdd_shop_daily.sql"
+        sql_path = temp_dir_path / "load_pdd_sku_daily.sql"
 
         write_csv(raw_csv_rows, RAW_ROW_COLUMNS, raw_csv_path)
         write_csv(sheet_inventory_rows, SHEET_INVENTORY_COLUMNS, sheet_inventory_csv_path)
@@ -703,7 +699,7 @@ def main():
     print(
         f"Loaded {len(raw_rows)} rows from {workbook_path.name} using sheet "
         f"{target_sheet['sheet_name']} through import_file_sheets, raw_import_rows, "
-        "stg_pdd_shop_day_sales, and fact_shop_day_sales."
+        "stg_pdd_sku_day_sales, and fact_sku_day_sales."
     )
 
 

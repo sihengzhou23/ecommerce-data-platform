@@ -45,6 +45,7 @@ Completed:
 - v1 schema implemented for the first PDD shop-daily slice
 - First ETL script implemented for a real PDD Excel workbook
 - First sample shop-daily workbook loaded into PostgreSQL
+- Operational storage boundary standardized around `/Volumes/DataHub/ecommerce`
 
 Not yet implemented:
 
@@ -191,7 +192,7 @@ dashboard/
 Reporting assets (later)
 
 data/  
-Local development data if needed
+Local development scratch data only if needed; not the operational storage home
 
 Physical source-data storage lives outside the repo on DataHub:
 - `/Volumes/DataHub/ecommerce/raw`
@@ -199,6 +200,12 @@ Physical source-data storage lives outside the repo on DataHub:
 - `/Volumes/DataHub/ecommerce/warehouse`
 - `/Volumes/DataHub/ecommerce/contracts`
 - `/Volumes/DataHub/ecommerce/docs`
+
+Operational boundary rule:
+- raw source files stay under `raw/`
+- machine-generated normalized outputs stay under `processed/`
+- PostgreSQL `edp` is the warehouse layer for metadata, staging, and canonical facts
+- the repo stays focused on code, SQL, docs, contracts, and optional dev-only scratch data
 
 ---
 
