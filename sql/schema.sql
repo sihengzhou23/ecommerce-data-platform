@@ -704,3 +704,149 @@ CROSS JOIN (
 ) AS seed(file_type_code, file_type_name, grain_code, description)
 WHERE p.platform_code = 'pdd'
 ON CONFLICT (platform_id, file_type_code, version) DO NOTHING;
+
+-- ============================================================
+-- 7-Day Trend Signal Views (Decision Layer Foundation)
+-- ============================================================
+
+CREATE OR REPLACE VIEW reporting.vw_pdd_spu_day_derived AS
+SELECT 
+    s.shop_code,
+    f.sales_date,
+    f.product_id AS spu_proxy,
+    COUNT(DISTINCT f.sku_id) AS sku_variant_count,
+    SUM(f.gross_quantity) AS total_quantity,
+    SUM(f.gross_product_amount) AS total_product_amount,
+    SUM(f.merchant_net_amount) AS total_net_revenue,
+    SUM(f.source_row_count) AS source_row_count
+FROM fact_sku_day_sales f
+JOIN shops s ON s.shop_id = f.shop_id
+WHERE f.product_id != ''
+GROUP BY s.shop_code, f.sales_date, f.product_id;
+
+CREATE OR REPLACE VIEW reporting.vw_pdd_shop_7d_trend AS
+WITH this_week AS (
+    SELECT 
+        shop_id,
+        SUM(gross_sales_amount) AS revenue_this_week,
+        SUM(buyer_count) AS buyers_this_week,
+        SUM(order_count) AS orders_this_week,
+        COUNT(DISTINCT sales_date) AS days_this_week
+    FROM fact_shop_day_sales
+    WHERE sales_date >= CURRENT_DATE - 7
+    GROUP BY shop_id
+),
+last_week AS (
+    SELECT 
+        shop_id,
+        SUM(gross_sales_amount) AS revenue_last_week,
+        SUM(buyer_count) AS buyers_last_week,
+        SUM(order_count) AS orders_last_week,
+        COUNT(DISTINCT sales_date) AS days_last_week
+    FROM fact_shop_day_sales
+    WHERE sales_date >= CURRENT_DATE - 14 
+      AND sales_date < CURRENT_DATE - 7
+    GROUP BY shop_id
+)
+SELECT 
+    s.shop_code,
+    COALESCE(t.revenue_this_week, 0) AS revenue_this_week,
+    COALESCE(t.buyers_this_week, 0) AS buyers_this_week,
+    COALESCE(t.orders_this_week, 0) AS orders_this_week,
+    t.days_this_week,
+    COALESCE(l.revenue_last_week, 0) AS revenue_last_week,
+    COALESCE(l.buyers_last_week, 0) AS buyers_last_week,
+    COALESCE(l.orders_last_week, 0) AS orders_last_week,
+    l.days_last_week,
+    CASE 
+        WHEN t.revenue_this_week IS NULL THEN 'no_data'
+        WHEN l.revenue_last_week IS NULL OR l.days_last_week < 4 THEN 'new'
+        WHEN t.revenue_this_week > l.revenue_last_week * 1.1 THEN 'rising'
+        WHEN t.revenue_this_week < l.revenue_last_week * 0.9 THEN 'falling'
+        ELSE 'stable'
+    END AS revenue_trend,
+    CASE
+        WHEN t.days_this_week < 4 THEN 'insufficient_data'
+        ELSE 'sufficient'
+    END AS data_quality
+FROM shops s
+LEFT JOIN this_week t ON t.shop_id = s.shop_id
+LEFT JOIN last_week l ON l.shop_id = s.shop_id
+WHERE s.is_active = TRUE;
+
+CREATE OR REPLACE VIEW reporting.vw_pdd_spu_7d_trend AS
+WITH this_week AS (
+    SELECT 
+        shop_id,
+        product_id AS spu_proxy,
+        SUM(merchant_net_amount) AS revenue_this_week,
+        SUM(gross_quantity) AS quantity_this_week,
+        COUNT(DISTINCT sales_date) AS days_this_week
+    FROM fact_sku_day_sales
+    WHERE sales_date >= CURRENT_DATE - 7
+      AND product_id != ''
+    GROUP BY shop_id, product_id
+),
+last_week AS (
+    SELECT 
+        shop_id,
+        product_id AS spu_proxy,
+        SUM(merchant_net_amount) AS revenue_last_week,
+        SUM(gross_quantity) AS quantity_last_week,
+        COUNT(DISTINCT sales_date) AS days_last_week
+    FROM fact_sku_day_sales
+    WHERE sales_date >= CURRENT_DATE - 14 
+      AND sales_date < CURRENT_DATE - 7
+      AND product_id != ''
+    GROUP BY shop_id, product_id
+),
+all_spus AS (
+    SELECT shop_id, spu_proxy FROM this_week
+    UNION
+    SELECT shop_id, spu_proxy FROM last_week
+)
+SELECT 
+    s.shop_code,
+    a.spu_proxy,
+    COALESCE(t.revenue_this_week, 0) AS revenue_this_week,
+    COALESCE(t.quantity_this_week, 0) AS quantity_this_week,
+    t.days_this_week,
+    COALESCE(l.revenue_last_week, 0) AS revenue_last_week,
+    COALESCE(l.quantity_last_week, 0) AS quantity_last_week,
+    l.days_last_week,
+    CASE 
+        WHEN t.revenue_this_week IS NULL THEN 'churned'
+        WHEN l.revenue_last_week IS NULL OR l.days_last_week < 4 THEN 'new'
+        WHEN t.revenue_this_week > l.revenue_last_week * 1.1 THEN 'rising'
+        WHEN t.revenue_this_week < l.revenue_last_week * 0.9 THEN 'falling'
+        ELSE 'stable'
+    END AS revenue_trend,
+    CASE
+        WHEN t.days_this_week < 4 THEN 'insufficient_data'
+        ELSE 'sufficient'
+    END AS data_quality
+FROM all_spus a
+JOIN shops s ON s.shop_id = a.shop_id AND s.is_active = TRUE
+LEFT JOIN this_week t ON t.shop_id = a.shop_id AND t.spu_proxy = a.spu_proxy
+LEFT JOIN last_week l ON l.shop_id = a.shop_id AND l.spu_proxy = a.spu_proxy;
+
+CREATE OR REPLACE VIEW reporting.vw_pdd_sku_execution_lever AS
+SELECT 
+    s.shop_code,
+    f.sales_date,
+    f.product_id AS spu_proxy,
+    f.sku_id,
+    f.merchant_sku_code,
+    f.product_specification,
+    f.gross_quantity,
+    f.gross_product_amount,
+    f.merchant_net_amount,
+    f.source_row_count,
+    RANK() OVER (
+        PARTITION BY s.shop_code, f.sales_date, f.product_id 
+        ORDER BY f.merchant_net_amount DESC
+    ) AS sku_revenue_rank_within_spu
+FROM fact_sku_day_sales f
+JOIN shops s ON s.shop_id = f.shop_id
+WHERE f.sku_id != ''
+  AND f.product_id != '';

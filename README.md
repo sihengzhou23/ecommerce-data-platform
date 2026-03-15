@@ -4,16 +4,24 @@ A PostgreSQL-first ecommerce data center for consolidating messy platform export
 
 ## Current state
 
-The project now has its first working vertical slice:
+The project is currently a **PDD-first ecommerce data/control foundation**.
+
+It already has a working ingestion and warehouse core:
 - source platform: **Pinduoduo (PDD)**
-- report type: **shop-daily sales**
-- first shop loaded: **`pdd_5`**
 - database: **PostgreSQL `edp`**
 - source file root: **`/Volumes/DataHub/ecommerce`**
+- canonical facts: **shop-day + SKU-day**
+- current control-layer preparation: **SPU proxy + 7-day trend scaffolding**
 
 Current modeled slices:
 - `pdd_shop_daily` -> `stg_pdd_shop_day_sales` -> `fact_shop_day_sales`
 - `pdd_sku_daily` -> `stg_pdd_sku_day_sales` -> `fact_sku_day_sales`
+
+Current decision-layer support views:
+- `reporting.vw_pdd_spu_day_derived`
+- `reporting.vw_pdd_shop_7d_trend`
+- `reporting.vw_pdd_spu_7d_trend`
+- `reporting.vw_pdd_sku_execution_lever`
 
 The current default workbook for the shop-daily loader is:
 - `/Volumes/DataHub/ecommerce/raw/pdd/workbooks/pdd_5_workbook_2026.xlsx`
@@ -81,11 +89,12 @@ Repository responsibilities stay narrow:
 
 ## Current scope
 
-Phase 1 is intentionally narrow:
-- CSV / Excel ingestion first
-- PDD shop-daily sales first
+Current scope is intentionally narrow:
+- CSV / Excel workbook ingestion first
+- PDD-first depth before platform breadth
 - clean canonical fact design first
-- no premature dashboards, automation frameworks, or cross-platform abstractions
+- control-system foundation before a broad decision engine
+- no premature order/customer master modeling or cross-platform abstractions
 
 ## Repository structure
 
@@ -341,14 +350,12 @@ SELECT * FROM import_files ORDER BY imported_at DESC;
 
 ## Next priorities
 
-1. continue building `PDD销售驾驶舱 v1` in Metabase using the new cockpit reporting views
-2. add the next stable cockpit sections:
-   - top summary trend 2
-   - focus shop ranking
-   - focus SKU ranking
-   - first product monitoring cards
-3. keep `SPU监控` clearly marked as `试运行` until a formal SPU fact slice exists
-4. decide how the boss/company should access the dashboard next:
-   - proper hosted Metabase deployment
-   - or another temporary sharing path
-5. after the cockpit is usable, move into richer SPU modeling and the first semantic decision layer for a future ecommerce decision agent
+1. finish ingestion hardening for the current PDD workbook family
+2. tighten the SPU/SKU operating bridge with `product_id` as the v1-core SPU proxy
+3. apply and validate the 7-day trend support views in PostgreSQL
+4. start the first narrow decision-layer design from the readiness gate docs
+5. translate the Feishu/OpenCloud business blueprint into a filtered v1-core field map:
+   - build now
+   - proxy now
+   - defer
+6. keep Metabase/cockpit work downstream and avoid unnecessary reporting-surface churn while the control foundation is being defined
