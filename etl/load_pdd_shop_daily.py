@@ -621,6 +621,14 @@ SET buyer_count = EXCLUDED.buyer_count,
     import_file_id = EXCLUDED.import_file_id,
     source_row_number = EXCLUDED.source_row_number;
 
+-- Quality logging: calculate duplicate rate for shop-day (source rows vs unique dates)
+UPDATE import_files SET duplicate_rate = (
+    SELECT COUNT(*)::numeric / NULLIF(COUNT(DISTINCT sales_date), 0)
+    FROM stg_pdd_shop_day_sales
+    WHERE import_file_id = :import_file_id
+)
+WHERE import_file_id = :import_file_id;
+
 COMMIT;
 """
 
@@ -631,6 +639,53 @@ def run_psql(sql_path, db_url):
         command.append(db_url)
     command.extend(["-f", str(sql_path)])
     subprocess.run(command, check=True)
+
+
+def fetch_shop_import_quality_metrics(db_url, shop_code, file_type_code):
+    if not db_url:
+        return None
+
+    query = """
+        SELECT 
+            i.row_count_raw,
+            i.duplicate_rate
+        FROM import_files i
+        JOIN source_file_types sft ON sft.source_file_type_id = i.source_file_type_id
+        JOIN shops sh ON sh.shop_id = i.shop_id
+        WHERE sh.shop_code = '{}'
+          AND sft.file_type_code = '{}'
+        ORDER BY i.imported_at DESC
+        LIMIT 1
+    """.format(shop_code.replace("'", "''"), file_type_code.replace("'", "''"))
+
+    result = subprocess.run(
+        ["psql", db_url, "-t", "-A", "-F", "|", "-c", query],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    
+    try:
+        parts = result.stdout.strip().split("|")
+        return {
+            "row_count_raw": int(parts[0]) if parts[0] and parts[0].strip() else None,
+            "duplicate_rate": float(parts[1]) if parts[1] and parts[1].strip() else None,
+        }
+    except (ValueError, IndexError):
+        return None
+
+
+def print_shop_quality_summary(metrics, raw_row_count):
+    if not metrics:
+        return
+    
+    print("\n--- Import Quality Summary ---")
+    print(f"  Source rows loaded: {metrics['row_count_raw'] or raw_row_count}")
+    print(f"  Duplicate rate (rows/unique dates): {metrics['duplicate_rate']:.2f}x" if metrics['duplicate_rate'] else "  Duplicate rate: N/A")
+    print("-----------------------------")
 
 
 def print_sheet_inventory(sheet_infos, inferred_target_sheet_name):
@@ -705,6 +760,9 @@ def main():
         f"{target_sheet['sheet_name']} through import_file_sheets, raw_import_rows, "
         "stg_pdd_shop_day_sales, and fact_shop_day_sales."
     )
+
+    metrics = fetch_shop_import_quality_metrics(args.db_url, args.shop_code, FILE_TYPE_CODE)
+    print_shop_quality_summary(metrics, len(raw_rows))
 
 
 if __name__ == "__main__":

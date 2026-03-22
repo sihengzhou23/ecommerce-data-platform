@@ -11,10 +11,10 @@
 | # | Prerequisite | Status | Evidence |
 |---|--------------|--------|----------|
 | 1 | Canonical shop-day facts exist and are trustworthy | ✅ Ready | `fact_shop_day_sales` - idempotent at grain |
-| 2 | Canonical SKU-day facts exist and are trustworthy | ✅ Ready | `fact_sku_day_sales` - aggregates duplicates |
+| 2 | Canonical SKU-day facts exist and are trustworthy | ✅ Ready | `fact_sku_day_sales` - aggregates duplicates, filters missing product_id |
 | 3 | SPU proxy defined | ✅ Ready | product_id as SPU proxy (see `docs/spu_sku_operating_bridge.md`) |
 | 4 | 7-day trend signal infrastructure defined | ✅ Ready | SQL views defined (see `docs/seven_day_trend_signal_foundation.md`) |
-| 5 | Ingestion hardening requirements documented | ✅ Ready | Explicit policies defined (see `docs/ingestion_hardening_requirements.md`) |
+| 5 | Ingestion hardening requirements documented | ✅ Implemented v1 | product_id filtering, quality metrics logged |
 
 ---
 
@@ -42,9 +42,9 @@
 
 | Item | Status | Action |
 |------|--------|--------|
-| Ingestion hardening implementation | Documented only | Implement when needed |
+| Ingestion hardening implementation | ✅ Implemented v1 | SKUs filtered by product_id, quality metrics logged |
 | SPU源数据 canonicalization | Deferred | Requires validation |
-| Trend view SQL creation | Not yet created | Tomorrow's first task |
+| Trend view SQL creation | ✅ Created | `reporting.vw_pdd_shop_7d_trend`, `vw_pdd_spu_7d_trend` exist |
 | Action-list engine v0 | Not yet created | After trend views |
 | Shop operating classification | Not yet created | After trend views |
 
@@ -52,21 +52,19 @@
 
 ## Immediate Next Steps (Tomorrow)
 
-If answer is **YES**, implement in this order:
+The trend views already exist. Next steps:
 
-1. **Create 7-day trend SQL views** (highest priority)
-   - `reporting.vw_pdd_shop_7d_trend`
-   - `reporting.vw_pdd_spu_7d_trend`
-   - `reporting.vw_pdd_sku_7d_trend`
-
-2. **Validate 7-day data coverage**
+1. **Validate 7-day data coverage**
    - Run queries to confirm each shop has ≥7 days in recent window
 
-3. **Create SPU-level derived view**
-   - `reporting.vw_pdd_spu_day_derived` (aggregate SKU→product_id)
-
-4. **Test trend queries**
+2. **Test trend queries**
    - Verify week-over-week classification produces sensible results
+
+3. **Create SPU-level derived view**
+   - `reporting.vw_pdd_spu_day_derived` (aggregate SKU→product_id) - already exists
+
+4. **Decision layer design**
+   - Begin action-list engine based on trend signals
 
 ---
 

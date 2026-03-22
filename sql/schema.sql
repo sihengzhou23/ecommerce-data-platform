@@ -42,7 +42,10 @@ CREATE TABLE import_files (
     file_hash VARCHAR(128),
     row_count_raw INT,
     imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT
+    notes TEXT,
+    skipped_canonical_count INT,
+    duplicate_rate NUMERIC(5,2),
+    numeric_sanitization_count INT
 );
 
 CREATE TABLE import_file_sheets (

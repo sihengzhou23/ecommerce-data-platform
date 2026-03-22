@@ -49,10 +49,10 @@ This doc defines the minimum next hardening tasks for the current PDD workbook i
 - Rows missing `sku_id` but having `product_id` → **ALLOW** (aggregate to product_id level)
 - Rows missing `product_specification` → **ALLOW** (aggregates to SKU-level via other identifiers)
 
-**Implementation note**: Add filter in canonical SQL:
-```sql
-WHERE product_id IS NOT NULL AND product_id != ''
-```
+**Implementation** (✅ Implemented):
+- Filter added in canonical SQL: `WHERE product_id IS NOT NULL AND product_id != ''`
+- Rows with missing product_id preserved in staging for audit
+- Quality metrics logged to `import_files.skipped_canonical_count`
 
 ### 3. Duplicate Rate Check ⚠️ REQUIRED
 
@@ -64,15 +64,10 @@ WHERE product_id IS NOT NULL AND product_id != ''
 | SKU source vs canonical ratio | `SUM(source_row_count) / COUNT(DISTINCT canonical_key)` | > 3x → investigate |
 | Shop duplicate rows | `COUNT(raw_rows) - COUNT(DISTINCT sales_date)` | Any > 0 |
 
-**Implementation**: Add to import_files table:
-```sql
-ALTER TABLE import_files ADD COLUMN IF NOT EXISTS duplicate_rate NUMERIC(5,2);
--- Populate after canonical load:
-UPDATE import_files SET duplicate_rate = (
-    SELECT COUNT(*)::numeric / NULLIF(COUNT(DISTINCT f.sales_date), 0)
-    FROM fact_shop_day_sales f WHERE f.import_file_id = import_files.import_file_id
-) WHERE source_file_type_id = (SELECT source_file_type_id FROM source_file_types WHERE file_type_code = 'pdd_shop_daily');
-```
+**Implementation** (✅ Implemented):
+- Added `duplicate_rate` column to `import_files` table
+- Populated via SQL after canonical load for both SKU and shop loads
+- Printed in post-load quality summary
 
 ### 4. Numeric Sanitization Logging ⚠️ REQUIRED
 
@@ -80,15 +75,12 @@ UPDATE import_files SET duplicate_rate = (
 
 **Required logging**:
 - Log to import_files.notes: "Numeric sanitization: N rows affected"
-- Capture at staging load time via SQL:
-```sql
--- After staging load, count rows where sanitization made a difference
-SELECT COUNT(*) FROM stg_pdd_sku_day_sales 
-WHERE raw_import_row_id IN (
-    SELECT r.raw_import_row_id FROM raw_import_rows r
-    WHERE r.raw_payload::text ~ '\.{2,}'
-);
-```
+- Capture at staging load time via SQL
+
+**Implementation** (✅ Implemented):
+- Added `numeric_sanitization_count` column to `import_files` table
+- Populated via SQL after staging load (checks for `\.{2,}` pattern in raw payloads)
+- Printed in post-load quality summary
 
 **Decision impact**: If > 10% of rows have sanitized numerics, flag for source data quality review.
 
@@ -112,9 +104,9 @@ ORDER BY shop_id, sales_date
 | Check | Required? | Shop-Daily | SKU-Daily | Action If Fail |
 |-------|-----------|------------|-----------|----------------|
 | Header resolution | ✅ | ✅ Pass | ✅ Pass | Block import |
-| product_id present | ✅ | N/A | ⚠️ Filter out empty | Remove from canonical |
-| Duplicate rate | ✅ | ≤1.0x | ≤3.0x | Log, investigate |
-| Numeric sanitization | ⚠️ Log | <10% | <10% | Flag for review |
+| product_id present | ✅ | N/A | ✅ Filter out empty | Remove from canonical |
+| Duplicate rate | ✅ | ✅ Logged | ✅ Logged | Log, investigate |
+| Numeric sanitization | ✅ Log | N/A | ✅ Logged | Flag for review |
 | 7-day data coverage | ✅ | ≥7 days | ≥7 days | Defer trend logic |
 
 ---

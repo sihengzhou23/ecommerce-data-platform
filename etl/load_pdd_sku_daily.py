@@ -603,6 +603,8 @@ SELECT
     COUNT(*)
 FROM stg_pdd_sku_day_sales
 WHERE import_file_id = :import_file_id
+  AND product_id IS NOT NULL
+  AND product_id != ''
 GROUP BY
     shop_id,
     sales_date,
@@ -617,6 +619,52 @@ SET gross_quantity = EXCLUDED.gross_quantity,
     import_file_id = EXCLUDED.import_file_id,
     source_row_count = EXCLUDED.source_row_count;
 
+-- Quality logging: count rows skipped from canonical due to missing product_id
+UPDATE import_files SET skipped_canonical_count = (
+    SELECT COUNT(*)
+    FROM stg_pdd_sku_day_sales
+    WHERE import_file_id = :import_file_id
+      AND (product_id IS NULL OR product_id = '')
+)
+WHERE import_file_id = :import_file_id;
+
+-- Quality logging: count rows with numeric sanitization (double decimals)
+UPDATE import_files SET numeric_sanitization_count = (
+    SELECT COUNT(*)
+    FROM stg_pdd_sku_day_sales s
+    JOIN raw_import_rows r ON r.raw_import_row_id = s.raw_import_row_id
+    WHERE s.import_file_id = :import_file_id
+      AND r.raw_payload::text ~ '\.{2,}'
+)
+WHERE import_file_id = :import_file_id;
+
+-- Quality logging: calculate duplicate aggregation ratio for canonical
+UPDATE import_files SET duplicate_rate = (
+    SELECT SUM(source_row_count)::numeric / NULLIF(COUNT(*), 0)
+    FROM (
+        SELECT
+            shop_id,
+            sales_date,
+            product_id,
+            sku_id,
+            merchant_sku_code,
+            product_specification,
+            SUM(source_row_count) AS source_row_count
+        FROM stg_pdd_sku_day_sales
+        WHERE import_file_id = :import_file_id
+          AND product_id IS NOT NULL
+          AND product_id != ''
+        GROUP BY
+            shop_id,
+            sales_date,
+            product_id,
+            sku_id,
+            merchant_sku_code,
+            product_specification
+    ) canonical_agg
+)
+WHERE import_file_id = :import_file_id;
+
 COMMIT;
 """
 
@@ -627,6 +675,63 @@ def run_psql(sql_path, db_url):
         command.append(db_url)
     command.extend(["-f", str(sql_path)])
     subprocess.run(command, check=True)
+
+
+def fetch_import_quality_metrics(db_url, shop_code, file_type_code):
+    if not db_url:
+        return None
+
+    query = """
+        SELECT 
+            i.row_count_raw,
+            i.skipped_canonical_count,
+            i.duplicate_rate,
+            i.numeric_sanitization_count
+        FROM import_files i
+        JOIN source_file_types sft ON sft.source_file_type_id = i.source_file_type_id
+        JOIN shops sh ON sh.shop_id = i.shop_id
+        WHERE sh.shop_code = '{}'
+          AND sft.file_type_code = '{}'
+        ORDER BY i.imported_at DESC
+        LIMIT 1
+    """.format(shop_code.replace("'", "''"), file_type_code.replace("'", "''"))
+
+    result = subprocess.run(
+        ["psql", db_url, "-t", "-A", "-F", "|", "-c", query],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    
+    try:
+        parts = result.stdout.strip().split("|")
+        return {
+            "row_count_raw": int(parts[0]) if parts[0] and parts[0].strip() else None,
+            "skipped_canonical_count": int(parts[1]) if parts[1] and parts[1].strip() else 0,
+            "duplicate_rate": float(parts[2]) if parts[2] and parts[2].strip() else None,
+            "numeric_sanitization_count": int(parts[3]) if parts[3] and parts[3].strip() else 0,
+        }
+    except (ValueError, IndexError):
+        return None
+
+
+def print_quality_summary(metrics, raw_row_count):
+    if not metrics:
+        return
+    
+    print("\n--- Import Quality Summary ---")
+    print(f"  Source rows loaded: {metrics['row_count_raw'] or raw_row_count}")
+    print(f"  Skipped from canonical (missing product_id): {metrics['skipped_canonical_count']}")
+    print(f"  Duplicate aggregation ratio: {metrics['duplicate_rate']:.2f}x" if metrics['duplicate_rate'] else "  Duplicate aggregation ratio: N/A")
+    print(f"  Numeric sanitization affected: {metrics['numeric_sanitization_count']}")
+    
+    if metrics['skipped_canonical_count'] and metrics['row_count_raw']:
+        skip_pct = (metrics['skipped_canonical_count'] / (metrics['row_count_raw'] or 1)) * 100
+        print(f"  Skip rate: {skip_pct:.1f}%")
+    print("-----------------------------")
 
 
 def print_sheet_inventory(sheet_infos, inferred_target_sheet_name):
@@ -701,6 +806,9 @@ def main():
         f"{target_sheet['sheet_name']} through import_file_sheets, raw_import_rows, "
         "stg_pdd_sku_day_sales, and fact_sku_day_sales."
     )
+
+    metrics = fetch_import_quality_metrics(args.db_url, args.shop_code, FILE_TYPE_CODE)
+    print_quality_summary(metrics, len(raw_rows))
 
 
 if __name__ == "__main__":
