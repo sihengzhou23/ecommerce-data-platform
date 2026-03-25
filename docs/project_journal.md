@@ -58,3 +58,25 @@ Next step:
 - optionally apply the updated schema to the live `edp` database
 - start the first narrow decision-layer design from the new readiness gate
 - translate the Feishu/OpenCloud business blueprint into a filtered v1-core field map (build now / proxy now / defer)
+
+## 2026-03-24
+
+Goal:
+Validate a practical new PDD source-data acquisition path that can support Renew without relying on brittle report-export automation.
+
+Work done:
+- treated the separate `/Users/ai-lab/Projects/automation/pdd` workstream as part of project progress rather than a detached side experiment
+- reset the PDD automation direction away from report-export/download-task automation and toward source-data acquisition
+- established a Commander ↔ Claude shared handoff workflow inside the PDD automation project
+- confirmed the first viable v1 route on the first PDD shop via `数据中心 → 交易数据`
+- verified that Playwright response interception can read structured data from `queryMallTradeList`
+- identified `queryMallTradeList.yesterdayRtList[-1]` as the first stable daily metrics source for shop-day ingestion
+- defined the first PostgreSQL landing target for this route as `shop_trade_metrics_daily`
+- wrote a v1 contract for that table in `/Users/ai-lab/Projects/automation/pdd/docs/shop_trade_metrics_daily_v1.md`
+- aligned the processed daily row contract to the PostgreSQL-facing field names for that first table target
+
+Next step:
+- run a short backfill/validation pass across several dates for the first shop daily metrics route
+- confirm field stability and nullable-field behavior
+- prepare CREATE TABLE + insert/upsert flow for `shop_trade_metrics_daily`
+- after that, decide whether to expand the same route to additional PDD shops or move to the next source page
